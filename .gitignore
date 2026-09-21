@@ -1,0 +1,25 @@
+# Android & Gradle
+.gradle/
+**/.gradle/
+build/
+**/build/
+local.properties
+**/local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE & OS
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+
+# Runtime data & user outputs
+data/
+downloads/
+短剧下载/
+*.log

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.6"
+        android:scaleY="0.6"
+        android:translateX="21.6"
+        android:translateY="21.6">
+        <!-- 电影场记板/短剧播放标识 -->
+        <path
+            android:fillColor="#FF4D4F"
+            android:pathData="M38,30 L74,54 L38,78 Z" />
+        <path
+            android:fillColor="#FFB800"
+            android:pathData="M30,22 C25.58,22 22,25.58 22,30 L22,78 C22,82.42 25.58,86 30,86 L78,86 C82.42,86 86,82.42 86,78 L86,30 C86,25.58 82.42,22 78,22 L30,22 Z M78,80 L30,80 C28.9,80 28,79.1 28,78 L28,30 C28,28.9 28.9,28 30,28 L78,28 C79.1,28 80,28.9 80,30 L80,78 C80,79.1 79.1,80 78,80 Z" />
+    </group>
+</vector>
