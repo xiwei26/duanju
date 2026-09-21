@@ -143,6 +143,7 @@ fun MainScreen(repository: JukuRepository) {
             chapters = activeChapters,
             currentEpisodeIndex = activeEpisodeIndex,
             videoUrl = activeVideoUrl,
+            viewerId = repository.apiClient.getViewerId(),
             danmakuList = danmakuList,
             onBack = { activeDrama = null },
             onEpisodeChange = { newIdx ->

@@ -54,4 +54,105 @@
    ```text
    http://192.168.1.108:8999
    ```
-4. 点击 **测试连接**，显示绿色“已连接 · 延迟 xx ms”即表示连通成功，剧库、播放、追剧、下载全功能即可无缝使用！
+4. 点击 **测试连接**，显示绿色”已连接 · 延迟 xx ms”即表示连通成功，剧库、播放、追剧、下载全功能即可无缝使用！
+
+---
+
+## 四、 视频播放修复说明 (2026-09-21)
+
+### 问题描述
+早期版本中，用户填写后台地址并登录后，剧库列表正常显示，但**点击播放视频时无法正常播放**。
+
+### 根本原因
+ExoPlayer 在播放通过后端代理的视频流时，没有携带后端要求的身份验证请求头（`X-Juku-Viewer` 和 `Sec-Fetch-Site`），导致后端无法识别用户身份，返回 401/403 权限错误。
+
+### 修复内容
+✅ **已完成修复**，现在视频可以正常播放：
+
+1. **PlayerScreen.kt** - 为 ExoPlayer 配置自定义 HTTP DataSource
+   - 自动附加 `X-Juku-Viewer` 身份令牌
+   - 自动附加 `Sec-Fetch-Site` 防 CSRF 验证头
+   - 设置合理的连接和读取超时
+
+2. **MainScreen.kt** - 传递用户身份信息
+   - 将 `viewerId` 从后端获取后传递给播放器
+   - 确保每个视频请求都能正确验证身份
+
+### 技术细节
+```kotlin
+// ExoPlayer 现在使用自定义 DataSource.Factory
+val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+    .setDefaultRequestProperties(
+        mapOf(
+            “X-Juku-Viewer” to viewerId,
+            “Sec-Fetch-Site” to “same-origin”
+        )
+    )
+```
+
+### 验证方法
+1. 编译并安装最新版本
+2. 连接到后端服务器
+3. 点击任意剧集封面
+4. **期望结果**：视频正常播放，可以拖动进度条，可以切换集数
+
+### 相关文档
+- 详细修复说明: `android/VIDEO_PLAYBACK_FIX.md`
+- 测试清单: `android/TESTING_CHECKLIST.md`
+- 验证报告: `android/VERIFICATION_REPORT.md`
+- 快速总结: `android/FIX_SUMMARY.md`
+
+---
+
+## 五、 开发与贡献
+
+### 项目结构
+```
+android/
+├── app/src/main/java/com/juku/app/
+│   ├── ui/
+│   │   ├── player/PlayerScreen.kt          # 播放器界面 (已修复)
+│   │   ├── home/HomeScreen.kt              # 首页
+│   │   ├── following/FollowingScreen.kt    # 追剧页面
+│   │   ├── download/DownloadScreen.kt      # 下载管理
+│   │   ├── settings/SettingsScreen.kt      # 设置页面
+│   │   └── MainScreen.kt                   # 主界面 (已修复)
+│   ├── data/
+│   │   ├── api/ApiClient.kt                # API 客户端
+│   │   ├── api/JukuApiService.kt           # API 接口定义
+│   │   ├── repository/JukuRepository.kt    # 数据仓库
+│   │   └── model/Models.kt                 # 数据模型
+│   └── ui/theme/                           # Cinema Noir 主题
+└── docs/                                   # 技术文档
+```
+
+### 技术栈
+- **UI**: Jetpack Compose + Material3
+- **网络**: Retrofit + OkHttp + Kotlinx Serialization
+- **视频**: AndroidX Media3 (ExoPlayer)
+- **异步**: Kotlin Coroutines + Flow
+- **架构**: MVVM + Repository 模式
+
+### 构建命令
+```bash
+# 清理构建
+./gradlew clean
+
+# 调试版本
+./gradlew assembleDebug
+
+# 发布版本
+./gradlew assembleRelease
+
+# 安装到设备
+./gradlew installDebug
+
+# 运行测试
+./gradlew test
+```
+
+---
+
+**维护状态**: ✅ 活跃开发中  
+**最后更新**: 2026-09-21  
+**主要修复**: 视频播放身份验证问题

@@ -28,7 +28,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.juku.app.data.model.Chapter
@@ -44,6 +46,7 @@ fun PlayerScreen(
     chapters: List<Chapter>,
     currentEpisodeIndex: Int,
     videoUrl: String,
+    viewerId: String = "",
     danmakuList: List<DanmakuItem> = emptyList(),
     onBack: () -> Unit,
     onEpisodeChange: (Int) -> Unit,
@@ -52,10 +55,33 @@ fun PlayerScreen(
     val context = LocalContext.current
 
     val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            playWhenReady = true
-            repeatMode = Player.REPEAT_MODE_OFF
+        // Create custom DataSource.Factory with required headers
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("JukuApp/1.0")
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(20000)
+            .setAllowCrossProtocolRedirects(true)
+
+        // Add custom headers if viewerId is available
+        if (viewerId.isNotBlank()) {
+            httpDataSourceFactory.setDefaultRequestProperties(
+                mapOf(
+                    "X-Juku-Viewer" to viewerId,
+                    "Sec-Fetch-Site" to "same-origin"
+                )
+            )
         }
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(httpDataSourceFactory)
+
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build()
+            .apply {
+                playWhenReady = true
+                repeatMode = Player.REPEAT_MODE_OFF
+            }
     }
 
     var isPlaying by remember { mutableStateOf(true) }
