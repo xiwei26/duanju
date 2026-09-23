@@ -33,14 +33,12 @@ fun SettingsScreen(
     onSaveServerUrl: (String) -> Unit,
     onTestConnection: () -> Unit,
     onLogin: (String, String, (String?) -> Unit) -> Unit,
+    onChangePassword: (String, String, (String?) -> Unit) -> Unit,
     onLogout: () -> Unit,
+    connectionOk: Boolean?,
     connectionStatus: String?
 ) {
     var serverUrlInput by remember(currentServerUrl) { mutableStateOf(currentServerUrl) }
-    var autoPrefetch by remember { mutableStateOf(true) }
-    var directStream by remember { mutableStateOf(true) }
-    var autoMerge by remember { mutableStateOf(true) }
-    var danmakuDefault by remember { mutableStateOf(true) }
 
     var showLoginDialog by remember { mutableStateOf(false) }
     var loginUsername by remember { mutableStateOf("") }
@@ -48,6 +46,30 @@ fun SettingsScreen(
     var passwordVisible by remember { mutableStateOf(false) }
     var loginError by remember { mutableStateOf<String?>(null) }
     var isLoggingIn by remember { mutableStateOf(false) }
+
+    var showChangePasswordDialog by remember { mutableStateOf(false) }
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var passwordChangeError by remember { mutableStateOf<String?>(null) }
+    var isChangingPassword by remember { mutableStateOf(false) }
+    val isSavedAddress = serverUrlInput.trim().trimEnd('/') == currentServerUrl.trim().trimEnd('/')
+
+    LaunchedEffect(currentAccount?.username) {
+        showChangePasswordDialog = false
+        currentPassword = ""
+        newPassword = ""
+        confirmPassword = ""
+        passwordChangeError = null
+    }
+
+    fun openChangePasswordDialog() {
+        currentPassword = ""
+        newPassword = ""
+        confirmPassword = ""
+        passwordChangeError = null
+        showChangePasswordDialog = true
+    }
 
     Column(
         modifier = Modifier
@@ -65,7 +87,7 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // User Profile Card (Supports Login / Logout / Role Tag)
+        // User Profile Card
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -156,9 +178,49 @@ fun SettingsScreen(
             }
         }
 
+        if (currentAccount != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            if (currentAccount.requirePasswordChange) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, CinemaRed, RoundedCornerShape(16.dp)),
+                    colors = CardDefaults.cardColors(containerColor = DarkCard),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            "请先修改初始密码",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                color = CinemaRed,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "此账号修改密码后才能使用剧库和播放功能。",
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = ::openChangePasswordDialog,
+                            colors = ButtonDefaults.buttonColors(containerColor = CinemaRed),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("立即修改密码")
+                        }
+                    }
+                }
+            } else {
+                OutlinedButton(onClick = ::openChangePasswordDialog) {
+                    Text("修改密码")
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Server Connection Config (Core Highlight Card)
+        // Server Connection Config
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -188,10 +250,7 @@ fun SettingsScreen(
 
                 OutlinedTextField(
                     value = serverUrlInput,
-                    onValueChange = {
-                        serverUrlInput = it
-                        onSaveServerUrl(it)
-                    },
+                    onValueChange = { serverUrlInput = it },
                     label = { Text("服务地址 (如 http://192.168.1.108:8999 或公网 VPS 域名)", fontSize = 12.sp) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
@@ -206,6 +265,18 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                Button(
+                    onClick = { onSaveServerUrl(serverUrlInput) },
+                    enabled = serverUrlInput.isNotBlank(),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = CinemaRed),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("保存并连接")
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -214,8 +285,11 @@ fun SettingsScreen(
                     Text(
                         text = connectionStatus ?: "未检测",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = if (connectionStatus?.contains("正常") == true || connectionStatus?.contains("运行中") == true)
-                                Color(0xFF52C41A) else CinemaRed,
+                            color = when (connectionOk) {
+                                true -> Color(0xFF52C41A)
+                                false -> CinemaRed
+                                null -> TextSecondary
+                            },
                             fontSize = 11.sp
                         ),
                         modifier = Modifier.weight(1f)
@@ -223,104 +297,18 @@ fun SettingsScreen(
 
                     Button(
                         onClick = onTestConnection,
+                        enabled = isSavedAddress,
                         shape = CircleShape,
                         colors = ButtonDefaults.buttonColors(containerColor = DarkElevated),
                         modifier = Modifier.height(32.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
                     ) {
-                        Text("测试连接", color = TextPrimary, fontSize = 11.sp)
+                        Text(if (isSavedAddress) "测试连接" else "请先保存地址", color = TextPrimary, fontSize = 11.sp)
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Playback & Download Settings
-        Text(
-            text = "播放与网络优化",
-            style = MaterialTheme.typography.titleSmall.copy(
-                color = TextSecondary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp
-            )
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .border(1.dp, DarkBorder, RoundedCornerShape(16.dp)),
-            colors = CardDefaults.cardColors(containerColor = DarkCard)
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                SettingSwitchItem(
-                    title = "自动预缓存下一集",
-                    desc = "根据网速提前拉取分片，切集0等待",
-                    checked = autoPrefetch,
-                    onCheckedChange = { autoPrefetch = it }
-                )
-                HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
-                SettingSwitchItem(
-                    title = "客户端直连源站",
-                    desc = "优先使用 302 播放，减少 Go 服务端转码与带宽开销",
-                    checked = directStream,
-                    onCheckedChange = { directStream = it }
-                )
-                HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
-                SettingSwitchItem(
-                    title = "短剧全集下载后智能无损合并",
-                    desc = "分集下载完成后自动调用后台 FFmpeg 组装成单集 MP4",
-                    checked = autoMerge,
-                    onCheckedChange = { autoMerge = it }
-                )
-                HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
-                SettingSwitchItem(
-                    title = "默认开启弹幕",
-                    desc = "进入播放器后自动载入实时滚动弹幕",
-                    checked = danmakuDefault,
-                    onCheckedChange = { danmakuDefault = it }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Storage & Cache
-        Text(
-            text = "存储与维护",
-            style = MaterialTheme.typography.titleSmall.copy(
-                color = TextSecondary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp
-            )
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .border(1.dp, DarkBorder, RoundedCornerShape(16.dp)),
-            colors = CardDefaults.cardColors(containerColor = DarkCard)
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                SettingClickItem(
-                    title = "清除播放器本地分片缓存",
-                    trailingText = "已占用 128 MB",
-                    onClick = {}
-                )
-                HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
-                SettingClickItem(
-                    title = "关于果果剧库 Android 客户端",
-                    trailingText = "v1.0.0 (Stitch Cinema Noir)",
-                    onClick = {}
-                )
-            }
-        }
     }
 
     // Login Dialog
@@ -453,86 +441,137 @@ fun SettingsScreen(
             }
         )
     }
-}
 
-@Composable
-private fun SettingSwitchItem(
-    title: String,
-    desc: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Medium,
-                    color = TextPrimary
+    if (showChangePasswordDialog && currentAccount != null) {
+        AlertDialog(
+            onDismissRequest = { if (!isChangingPassword) showChangePasswordDialog = false },
+            containerColor = DarkCard,
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Text(
+                    if (currentAccount.requirePasswordChange) "修改初始密码" else "修改账号密码",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = desc,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    color = TextMuted,
-                    fontSize = 11.sp
-                )
-            )
-        }
-
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = CinemaRed,
-                uncheckedThumbColor = TextMuted,
-                uncheckedTrackColor = DarkElevated
-            )
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "新密码需为 10–128 个字符。修改后其他设备需要重新登录。",
+                        style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    PasswordEntryField(
+                        value = currentPassword,
+                        onValueChange = { currentPassword = it },
+                        label = "当前密码",
+                        enabled = !isChangingPassword
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    PasswordEntryField(
+                        value = newPassword,
+                        onValueChange = { newPassword = it },
+                        label = "新密码",
+                        enabled = !isChangingPassword
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    PasswordEntryField(
+                        value = confirmPassword,
+                        onValueChange = { confirmPassword = it },
+                        label = "确认新密码",
+                        enabled = !isChangingPassword
+                    )
+                    passwordChangeError?.let { error ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            error,
+                            color = CinemaRed,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        passwordChangeError = when {
+                            currentPassword.isBlank() -> "请输入当前密码"
+                            newPassword.codePointCount(0, newPassword.length) !in 10..128 -> "新密码需为 10–128 个字符"
+                            newPassword == currentPassword -> "新密码不能与当前密码相同"
+                            confirmPassword != newPassword -> "两次输入的新密码不一致"
+                            else -> null
+                        }
+                        if (passwordChangeError != null) return@Button
+                        isChangingPassword = true
+                        onChangePassword(currentPassword, newPassword) { error ->
+                            isChangingPassword = false
+                            if (error != null) {
+                                passwordChangeError = error
+                            } else {
+                                currentPassword = ""
+                                newPassword = ""
+                                confirmPassword = ""
+                                showChangePasswordDialog = false
+                            }
+                        }
+                    },
+                    enabled = !isChangingPassword,
+                    colors = ButtonDefaults.buttonColors(containerColor = CinemaRed)
+                ) {
+                    if (isChangingPassword) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("确认修改")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showChangePasswordDialog = false },
+                    enabled = !isChangingPassword
+                ) {
+                    Text("取消", color = TextSecondary)
+                }
+            }
         )
     }
 }
 
 @Composable
-private fun SettingClickItem(
-    title: String,
-    trailingText: String,
-    onClick: () -> Unit
+private fun PasswordEntryField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    enabled: Boolean
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontWeight = FontWeight.Medium,
-                color = TextPrimary
-            )
+    var visible by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        enabled = enabled,
+        singleLine = true,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        trailingIcon = {
+            IconButton(onClick = { visible = !visible }, enabled = enabled) {
+                Icon(
+                    imageVector = if (visible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = if (visible) "隐藏密码" else "显示密码",
+                    tint = TextSecondary
+                )
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = CinemaRed,
+            unfocusedBorderColor = DarkBorder,
+            focusedTextColor = TextPrimary,
+            unfocusedTextColor = TextPrimary
         )
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = trailingText,
-                style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 11.sp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = TextMuted,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-    }
+    )
 }

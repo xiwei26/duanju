@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,7 +64,9 @@ fun CategoryPill(
 fun DramaCard(
     drama: Drama,
     serverUrl: String,
+    requestHeaders: Map<String, String> = emptyMap(),
     onClick: () -> Unit,
+    isFollowed: Boolean = false,
     onFollowClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -80,7 +83,11 @@ fun DramaCard(
                 .aspectRatio(0.75f) // 3:4 aspect ratio
         ) {
             AsyncImage(
-                model = drama.displayCover(serverUrl),
+                model = authenticatedImageRequest(
+                    LocalContext.current,
+                    drama.displayCover(serverUrl),
+                    requestHeaders
+                ),
                 contentDescription = drama.displayTitle(),
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
@@ -145,7 +152,7 @@ fun DramaCard(
                     modifier = Modifier.size(24.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.BookmarkBorder,
+                        imageVector = if (isFollowed) Icons.Default.Bookmark else Icons.Outlined.BookmarkBorder,
                         contentDescription = "追剧",
                         tint = CinemaRed,
                         modifier = Modifier.size(16.dp)
@@ -159,14 +166,16 @@ fun DramaCard(
 @Composable
 fun JukuBottomNavBar(
     selectedTab: Int,
+    showDownloads: Boolean = true,
     onTabSelected: (Int) -> Unit
 ) {
-    val items = listOf(
-        Triple("剧库", Icons.Default.VideoLibrary, Icons.Outlined.VideoLibrary),
-        Triple("追剧", Icons.Default.Bookmark, Icons.Outlined.BookmarkBorder),
-        Triple("下载", Icons.Default.Download, Icons.Outlined.Download),
-        Triple("我的", Icons.Default.Person, Icons.Outlined.PersonOutline)
-    )
+    data class NavItem(val tab: Int, val label: String, val filled: ImageVector, val outlined: ImageVector)
+    val items = buildList {
+        add(NavItem(0, "剧库", Icons.Default.VideoLibrary, Icons.Outlined.VideoLibrary))
+        add(NavItem(1, "追剧", Icons.Default.Bookmark, Icons.Outlined.BookmarkBorder))
+        if (showDownloads) add(NavItem(2, "下载", Icons.Default.Download, Icons.Outlined.Download))
+        add(NavItem(3, "我的", Icons.Default.Person, Icons.Outlined.PersonOutline))
+    }
 
     Surface(
         color = DarkElevated.copy(alpha = 0.95f),
@@ -182,24 +191,24 @@ fun JukuBottomNavBar(
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            items.forEachIndexed { index, (label, filledIcon, outlinedIcon) ->
-                val isSelected = selectedTab == index
+            items.forEach { item ->
+                val isSelected = selectedTab == item.tab
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .clip(CircleShape)
-                        .clickable { onTabSelected(index) }
+                        .clickable { onTabSelected(item.tab) }
                         .padding(horizontal = 16.dp, vertical = 6.dp)
                 ) {
                     Icon(
-                        imageVector = if (isSelected) filledIcon else outlinedIcon,
-                        contentDescription = label,
+                        imageVector = if (isSelected) item.filled else item.outlined,
+                        contentDescription = item.label,
                         tint = if (isSelected) CinemaRed else TextSecondary,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = label,
+                        text = item.label,
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontSize = 10.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,

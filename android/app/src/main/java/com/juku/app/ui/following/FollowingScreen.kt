@@ -17,25 +17,31 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.juku.app.data.model.FollowingItem
+import com.juku.app.ui.components.authenticatedImageRequest
 import com.juku.app.ui.theme.*
 
 @Composable
 fun FollowingScreen(
     followingList: List<FollowingItem>,
     historyList: List<FollowingItem>,
+    isLoading: Boolean = false,
+    errorMessage: String? = null,
     serverUrl: String,
+    requestHeaders: Map<String, String> = emptyMap(),
     onDramaClick: (String) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) } // 0: 追剧, 1: 历史
 
     val currentList = if (selectedTab == 0) followingList else historyList
-    val continueWatching = currentList.firstOrNull()
+    val continueWatching = historyList.firstOrNull { !it.completed }.takeIf { selectedTab == 1 }
+    val visibleList = if (continueWatching == null) currentList else currentList.filterNot { it == continueWatching }
 
     Column(
         modifier = Modifier
@@ -96,9 +102,6 @@ fun FollowingScreen(
                 }
             }
 
-            TextButton(onClick = {}) {
-                Text("管理", color = TextSecondary, fontSize = 13.sp)
-            }
         }
 
         LazyColumn(
@@ -108,12 +111,25 @@ fun FollowingScreen(
             contentPadding = PaddingValues(bottom = 80.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            if (isLoading && currentList.isEmpty()) {
+                item {
+                    Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = CinemaRed)
+                    }
+                }
+            }
+            if (errorMessage != null) {
+                item {
+                    Text(errorMessage, color = CinemaRed, modifier = Modifier.padding(vertical = 12.dp))
+                }
+            }
             // Continue Watching Hero Card
             if (continueWatching != null) {
                 item {
                     ContinueWatchingCard(
-                        item = continueWatching,
-                        serverUrl = serverUrl,
+                    item = continueWatching,
+                    serverUrl = serverUrl,
+                    requestHeaders = requestHeaders,
                         onClick = { onDramaClick(continueWatching.dramaId) }
                     )
                 }
@@ -130,7 +146,7 @@ fun FollowingScreen(
                 )
             }
 
-            if (currentList.isEmpty()) {
+            if (currentList.isEmpty() && !isLoading && errorMessage == null) {
                 item {
                     Box(
                         modifier = Modifier
@@ -146,10 +162,11 @@ fun FollowingScreen(
                     }
                 }
             } else {
-                items(currentList) { item ->
+                items(visibleList) { item ->
                     FollowingItemRow(
                         item = item,
                         serverUrl = serverUrl,
+                        requestHeaders = requestHeaders,
                         onClick = { onDramaClick(item.dramaId) }
                     )
                 }
@@ -162,8 +179,14 @@ fun FollowingScreen(
 fun ContinueWatchingCard(
     item: FollowingItem,
     serverUrl: String,
+    requestHeaders: Map<String, String> = emptyMap(),
     onClick: () -> Unit
 ) {
+    val progress = if (item.duration > 0) {
+        (item.position / item.duration).toFloat().coerceIn(0f, 1f)
+    } else {
+        0f
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -179,7 +202,11 @@ fun ContinueWatchingCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
-                model = item.coverUrl ?: "",
+                model = authenticatedImageRequest(
+                    LocalContext.current,
+                    item.coverUrl,
+                    requestHeaders
+                ),
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -215,14 +242,15 @@ fun ContinueWatchingCard(
                 )
 
                 Text(
-                    text = item.episode?.let { "第 $it 集 · 观看至 85%" } ?: "观看至 85%",
+                    text = item.episode?.let { "第 $it 集 · 观看至 ${(progress * 100).toInt()}%" }
+                        ?: "观看至 ${(progress * 100).toInt()}%",
                     style = MaterialTheme.typography.bodyMedium.copy(color = TextMuted, fontSize = 12.sp)
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
                 LinearProgressIndicator(
-                    progress = { 0.85f },
+                    progress = { progress },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(3.dp)
@@ -257,6 +285,7 @@ fun ContinueWatchingCard(
 fun FollowingItemRow(
     item: FollowingItem,
     serverUrl: String,
+    requestHeaders: Map<String, String> = emptyMap(),
     onClick: () -> Unit
 ) {
     Row(
@@ -270,7 +299,11 @@ fun FollowingItemRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
-            model = item.coverUrl ?: "",
+            model = authenticatedImageRequest(
+                LocalContext.current,
+                item.coverUrl,
+                requestHeaders
+            ),
             contentDescription = item.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier
@@ -294,7 +327,9 @@ fun FollowingItemRow(
                 style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary, fontSize = 11.sp)
             )
             Text(
-                text = "全80集完结",
+                text = (item.totalEpisode.takeIf { it > 0 } ?: item.knownEpisodes.takeIf { it > 0 })
+                    ?.let { "共${it}集" }
+                    ?: "集数未知",
                 style = MaterialTheme.typography.labelSmall.copy(color = CinemaGold, fontSize = 10.sp)
             )
         }

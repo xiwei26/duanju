@@ -19,7 +19,7 @@ captures/
 Thumbs.db
 
 # Runtime data & user outputs
-data/
+/data/
 downloads/
 短剧下载/
 *.log

@@ -43,6 +43,7 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
@@ -69,6 +70,9 @@ dependencies {
 
     // Image loading (Coil)
     implementation(libs.coil.compose)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.mockwebserver)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

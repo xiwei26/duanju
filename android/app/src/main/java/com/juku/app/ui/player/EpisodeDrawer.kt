@@ -13,7 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -140,7 +139,6 @@ fun EpisodeDrawer(
             ) {
                 items(currentSegmentRange.toList()) { epIdx ->
                     val isPlaying = epIdx == currentEpisodeIndex
-                    val isWatched = epIdx < currentEpisodeIndex
                     val episodeNum = epIdx + 1
 
                     Box(
@@ -150,7 +148,6 @@ fun EpisodeDrawer(
                             .background(
                                 when {
                                     isPlaying -> CinemaRed.copy(alpha = 0.25f)
-                                    isWatched -> DarkElevated
                                     else -> DarkCard
                                 }
                             )
@@ -187,7 +184,7 @@ fun EpisodeDrawer(
                             Text(
                                 text = "$episodeNum",
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    color = if (isWatched) TextMuted else TextPrimary,
+                                    color = TextPrimary,
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 13.sp
                                 )
@@ -199,37 +196,16 @@ fun EpisodeDrawer(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Bottom Action Bar
-            Row(
+            Button(
+                onClick = {
+                    onEpisodeSelect(0)
+                    onDismiss()
+                },
+                shape = CircleShape,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                colors = ButtonDefaults.buttonColors(containerColor = CinemaRed)
             ) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    shape = CircleShape,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "整季批量缓存",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("整季缓存", fontSize = 13.sp)
-                }
-
-                Button(
-                    onClick = {
-                        onEpisodeSelect(0)
-                        onDismiss()
-                    },
-                    shape = CircleShape,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = CinemaRed)
-                ) {
-                    Text("从第1集播放", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
+                Text("从第1集播放", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
     }

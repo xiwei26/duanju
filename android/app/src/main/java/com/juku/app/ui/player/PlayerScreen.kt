@@ -2,6 +2,7 @@ package com.juku.app.ui.player
 
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -27,17 +29,23 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.juku.app.data.model.Chapter
 import com.juku.app.data.model.DanmakuItem
 import com.juku.app.data.model.Drama
 import com.juku.app.ui.theme.*
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -46,15 +54,24 @@ fun PlayerScreen(
     chapters: List<Chapter>,
     currentEpisodeIndex: Int,
     videoUrl: String,
-    viewerId: String = "",
+    startPositionSeconds: Double = 0.0,
+    autoPlay: Boolean = true,
+    requestHeaders: Map<String, String> = emptyMap(),
     danmakuList: List<DanmakuItem> = emptyList(),
+    errorMessage: String? = null,
+    isFollowed: Boolean = false,
     onBack: () -> Unit,
     onEpisodeChange: (Int) -> Unit,
-    onProgressUpdate: (positionSeconds: Double, durationSeconds: Double) -> Unit
+    onFollowChange: (Boolean) -> Unit,
+    onRetry: () -> Unit,
+    onProgressUpdate: (positionSeconds: Double, durationSeconds: Double) -> Unit,
+    onPositionChange: (positionSeconds: Double, durationSeconds: Double) -> Unit,
+    onPlaybackError: (responseCode: Int?) -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    val exoPlayer = remember {
+    val exoPlayer = remember(requestHeaders) {
         // Create custom DataSource.Factory with required headers
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("JukuApp/1.0")
@@ -62,14 +79,8 @@ fun PlayerScreen(
             .setReadTimeoutMs(20000)
             .setAllowCrossProtocolRedirects(true)
 
-        // Add custom headers if viewerId is available
-        if (viewerId.isNotBlank()) {
-            httpDataSourceFactory.setDefaultRequestProperties(
-                mapOf(
-                    "X-Juku-Viewer" to viewerId,
-                    "Sec-Fetch-Site" to "same-origin"
-                )
-            )
+        if (requestHeaders.isNotEmpty()) {
+            httpDataSourceFactory.setDefaultRequestProperties(requestHeaders)
         }
 
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
@@ -79,37 +90,85 @@ fun PlayerScreen(
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
             .apply {
-                playWhenReady = true
+                playWhenReady = autoPlay
                 repeatMode = Player.REPEAT_MODE_OFF
             }
     }
 
-    var isPlaying by remember { mutableStateOf(true) }
+    var isPlaying by remember(videoUrl) { mutableStateOf(autoPlay) }
     var currentPosMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var isDanmakuOn by remember { mutableStateOf(true) }
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
-    var isFollowed by remember { mutableStateOf(false) }
     var showEpisodeDrawer by remember { mutableStateOf(false) }
+    var lastReportedAtMs by remember(videoUrl) { mutableStateOf<Long?>(null) }
 
-    // Load media URL into ExoPlayer when it changes
-    LaunchedEffect(videoUrl) {
-        if (videoUrl.isNotBlank()) {
-            val mediaItem = MediaItem.fromUri(videoUrl)
-            exoPlayer.setMediaItem(mediaItem)
-            exoPlayer.prepare()
-            exoPlayer.play()
+    fun publishPosition(report: Boolean) {
+        if (videoUrl.isBlank()) return
+        val position = exoPlayer.currentPosition.coerceAtLeast(0L) / 1000.0
+        val duration = exoPlayer.duration.coerceAtLeast(0L) / 1000.0
+        if (duration > 0) {
+            onPositionChange(position, duration)
+            if (report) {
+                lastReportedAtMs = SystemClock.elapsedRealtime()
+                onProgressUpdate(position, duration)
+            }
         }
     }
 
+    // Load media URL into ExoPlayer when it changes
+    LaunchedEffect(videoUrl, exoPlayer, startPositionSeconds, autoPlay) {
+        if (videoUrl.isNotBlank()) {
+            val mediaItem = MediaItem.fromUri(videoUrl)
+            exoPlayer.setMediaItem(mediaItem)
+            if (startPositionSeconds.isFinite() && startPositionSeconds > 0) {
+                exoPlayer.seekTo((startPositionSeconds * 1000).toLong())
+            }
+            exoPlayer.prepare()
+            if (autoPlay) exoPlayer.play() else exoPlayer.pause()
+        } else {
+            exoPlayer.stop()
+            exoPlayer.clearMediaItems()
+            currentPosMs = 0L
+            durationMs = 0L
+        }
+    }
+
+    val currentOnError by rememberUpdatedState(onPlaybackError)
+    val currentOnProgress by rememberUpdatedState(onProgressUpdate)
+    DisposableEffect(exoPlayer, videoUrl) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                val responseCode = generateSequence(error as Throwable?) { it.cause }
+                    .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+                    .firstOrNull()?.responseCode
+                currentOnError(responseCode)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED && videoUrl.isNotBlank()) {
+                    val duration = exoPlayer.duration.coerceAtLeast(0L) / 1000.0
+                    if (duration > 0) currentOnProgress(duration, duration)
+                }
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose { exoPlayer.removeListener(listener) }
+    }
+
     // Periodic progress update
-    LaunchedEffect(exoPlayer) {
+    LaunchedEffect(exoPlayer, videoUrl) {
         while (true) {
-            if (exoPlayer.isPlaying) {
+            if (videoUrl.isNotBlank()) {
                 currentPosMs = exoPlayer.currentPosition
                 durationMs = exoPlayer.duration.coerceAtLeast(0L)
                 if (durationMs > 0) {
-                    onProgressUpdate(currentPosMs / 1000.0, durationMs / 1000.0)
+                    onPositionChange(currentPosMs / 1000.0, durationMs / 1000.0)
+                    val nowMs = SystemClock.elapsedRealtime()
+                    if (exoPlayer.isPlaying && shouldReportPlaybackProgress(nowMs, lastReportedAtMs)) {
+                        lastReportedAtMs = nowMs
+                        onProgressUpdate(currentPosMs / 1000.0, durationMs / 1000.0)
+                    }
                 }
             }
             isPlaying = exoPlayer.isPlaying
@@ -117,10 +176,21 @@ fun PlayerScreen(
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(exoPlayer) {
         onDispose {
             exoPlayer.release()
         }
+    }
+
+    DisposableEffect(lifecycleOwner, exoPlayer, videoUrl) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && videoUrl.isNotBlank()) {
+                publishPosition(report = true)
+                exoPlayer.pause()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val currentChapter = chapters.getOrNull(currentEpisodeIndex)
@@ -144,8 +214,27 @@ fun PlayerScreen(
                     )
                 }
             },
+            update = { it.player = exoPlayer },
             modifier = Modifier.fillMaxSize()
         )
+
+        if (videoUrl.isBlank() && errorMessage == null) {
+            CircularProgressIndicator(
+                color = CinemaRed,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
+
+        if (errorMessage != null) {
+            Column(
+                modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(errorMessage, color = Color.White)
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(onClick = onRetry) { Text("重试") }
+            }
+        }
 
         // Danmaku Overlay
         if (isDanmakuOn && danmakuList.isNotEmpty()) {
@@ -202,7 +291,7 @@ fun PlayerScreen(
             ) {
                 IconButton(onClick = onBack) {
                     Icon(
-                        imageVector = Icons.Default.ArrowBack,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "返回",
                         tint = Color.White
                     )
@@ -215,43 +304,16 @@ fun PlayerScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "第 $episodeNum 集",
+                        text = if (currentChapter == null) "正在准备…" else "第 $episodeNum 集",
                         style = MaterialTheme.typography.labelSmall.copy(color = CinemaGold)
                     )
                 }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Quality Pill
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(DarkCard.copy(alpha = 0.8f))
-                        .border(1.dp, DarkBorder, CircleShape)
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "1080P 超清",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = Color.White,
-                            fontSize = 11.sp
-                        )
-                    )
-                }
-                Spacer(modifier = Modifier.width(6.dp))
-                IconButton(onClick = { /* Rotate */ }) {
-                    Icon(
-                        imageVector = Icons.Default.ScreenRotation,
-                        contentDescription = "横屏",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
         }
 
         // Right Vertical Action Column
-        Column(
+        if (chapters.isNotEmpty()) Column(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(end = 12.dp),
@@ -282,7 +344,7 @@ fun PlayerScreen(
 
             // Follow / Favorite Button
             FloatingActionButton(
-                onClick = { isFollowed = !isFollowed },
+                onClick = { onFollowChange(!isFollowed) },
                 containerColor = DarkCard.copy(alpha = 0.85f),
                 contentColor = if (isFollowed) CinemaRed else Color.White,
                 shape = CircleShape,
@@ -299,38 +361,22 @@ fun PlayerScreen(
             }
 
             // Danmaku Toggle
-            FloatingActionButton(
-                onClick = { isDanmakuOn = !isDanmakuOn },
-                containerColor = DarkCard.copy(alpha = 0.85f),
-                contentColor = if (isDanmakuOn) CinemaRed else Color.White,
-                shape = CircleShape,
-                modifier = Modifier.size(46.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.Subtitles,
-                        contentDescription = "弹幕",
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(if (isDanmakuOn) "开" else "关", fontSize = 9.sp)
-                }
-            }
-
-            // Download Button
-            FloatingActionButton(
-                onClick = { /* Start Download */ },
-                containerColor = DarkCard.copy(alpha = 0.85f),
-                contentColor = Color.White,
-                shape = CircleShape,
-                modifier = Modifier.size(46.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "缓存",
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text("缓存", fontSize = 9.sp)
+            if (danmakuList.isNotEmpty()) {
+                FloatingActionButton(
+                    onClick = { isDanmakuOn = !isDanmakuOn },
+                    containerColor = DarkCard.copy(alpha = 0.85f),
+                    contentColor = if (isDanmakuOn) CinemaRed else Color.White,
+                    shape = CircleShape,
+                    modifier = Modifier.size(46.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Subtitles,
+                            contentDescription = "弹幕",
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(if (isDanmakuOn) "开" else "关", fontSize = 9.sp)
+                    }
                 }
             }
         }
@@ -358,7 +404,7 @@ fun PlayerScreen(
         ) {
             // Episode Title & Synopsis
             Text(
-                text = currentChapter?.title ?: "第 $episodeNum 集",
+                text = currentChapter?.title ?: "正在准备播放",
                 style = MaterialTheme.typography.titleMedium.copy(
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
@@ -366,7 +412,7 @@ fun PlayerScreen(
                 )
             )
             Text(
-                text = drama.desc ?: drama.intro ?: "高能短剧，精彩绝伦，逆袭归来！",
+                text = drama.desc.ifBlank { drama.intro.ifBlank { "精彩短剧" } },
                 style = MaterialTheme.typography.bodyMedium.copy(
                     color = TextSecondary,
                     fontSize = 12.sp
@@ -389,10 +435,14 @@ fun PlayerScreen(
                 )
                 Slider(
                     value = progressFraction,
+                    enabled = videoUrl.isNotBlank() && durationMs > 0,
                     onValueChange = { frac ->
                         val targetMs = (frac * durationMs).toLong()
                         exoPlayer.seekTo(targetMs)
+                        currentPosMs = targetMs
+                        onPositionChange(targetMs / 1000.0, durationMs / 1000.0)
                     },
+                    onValueChangeFinished = { publishPosition(report = true) },
                     modifier = Modifier
                         .weight(1f)
                         .padding(horizontal = 8.dp),
@@ -416,9 +466,11 @@ fun PlayerScreen(
             ) {
                 // Play / Pause Toggle
                 IconButton(
+                    enabled = videoUrl.isNotBlank(),
                     onClick = {
                         if (exoPlayer.isPlaying) {
                             exoPlayer.pause()
+                            publishPosition(report = true)
                         } else {
                             exoPlayer.play()
                         }
@@ -438,7 +490,7 @@ fun PlayerScreen(
                     modifier = Modifier
                         .clip(CircleShape)
                         .background(DarkCard)
-                        .clickable {
+                        .clickable(enabled = videoUrl.isNotBlank()) {
                             playbackSpeed = when (playbackSpeed) {
                                 1.0f -> 1.25f
                                 1.25f -> 1.5f
@@ -474,7 +526,7 @@ fun PlayerScreen(
         }
 
         // Episode Drawer Sheet
-        if (showEpisodeDrawer) {
+        if (showEpisodeDrawer && chapters.isNotEmpty()) {
             EpisodeDrawer(
                 dramaTitle = drama.displayTitle(),
                 chapters = chapters,
@@ -490,5 +542,5 @@ private fun formatTime(ms: Long): String {
     val totalSeconds = (ms / 1000).coerceAtLeast(0)
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
-    return String.format("%02d:%02d", minutes, seconds)
+    return String.format(Locale.ROOT, "%02d:%02d", minutes, seconds)
 }

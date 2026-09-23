@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,6 +30,7 @@ import coil.compose.AsyncImage
 import com.juku.app.data.model.Drama
 import com.juku.app.ui.components.CategoryPill
 import com.juku.app.ui.components.DramaCard
+import com.juku.app.ui.components.authenticatedImageRequest
 import com.juku.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,14 +39,20 @@ fun HomeScreen(
     dramas: List<Drama>,
     isLoading: Boolean,
     serverUrl: String,
+    connectionStatus: String? = null,
+    isConnected: Boolean = false,
+    categoryOptions: List<String> = emptyList(),
+    requestHeaders: Map<String, String> = emptyMap(),
+    followedDramaIds: Set<String> = emptySet(),
     onDramaClick: (Drama) -> Unit,
+    onFollowClick: (Drama, Boolean) -> Unit,
     onSearch: (String) -> Unit,
     onCategorySelect: (String?) -> Unit,
     onRefresh: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
-    val categories = listOf("全部", "真人剧", "漫剧", "AI剧", "热播榜")
+    val categories = listOf("全部") + categoryOptions
 
     val featuredDrama = dramas.firstOrNull()
 
@@ -76,7 +84,7 @@ fun HomeScreen(
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(SuccessGreen.copy(alpha = 0.2f))
+                        .background((if (isConnected) SuccessGreen else CinemaRed).copy(alpha = 0.2f))
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -84,13 +92,13 @@ fun HomeScreen(
                             modifier = Modifier
                                 .size(6.dp)
                                 .clip(CircleShape)
-                                .background(SuccessGreen)
+                                .background(if (isConnected) SuccessGreen else CinemaRed)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "服务在线",
+                            text = if (isConnected) "服务在线" else "未连接",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = SuccessGreen,
+                                color = if (isConnected) SuccessGreen else CinemaRed,
                                 fontSize = 9.sp
                             )
                         )
@@ -107,6 +115,15 @@ fun HomeScreen(
             }
         }
 
+        if (connectionStatus != null && !isConnected) {
+            Text(
+                text = connectionStatus,
+                color = if (connectionStatus.contains("加载")) TextSecondary else CinemaRed,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+        }
+
         // Search Box
         Box(
             modifier = Modifier
@@ -121,7 +138,11 @@ fun HomeScreen(
                 value = searchQuery,
                 onValueChange = {
                     searchQuery = it
-                    if (it.length >= 2) onSearch(it)
+                    if (it.isBlank()) onSearch("")
+                    else if (it.length >= 2) {
+                        selectedCategory = null
+                        onSearch(it)
+                    }
                 },
                 placeholder = {
                     Text(
@@ -180,6 +201,7 @@ fun HomeScreen(
                     text = cat,
                     isSelected = isSelected,
                     onClick = {
+                        searchQuery = ""
                         selectedCategory = if (cat == "全部") null else cat
                         onCategorySelect(selectedCategory)
                     }
@@ -206,6 +228,7 @@ fun HomeScreen(
                         HeroBanner(
                             drama = featuredDrama,
                             serverUrl = serverUrl,
+                            requestHeaders = requestHeaders,
                             onClick = { onDramaClick(featuredDrama) }
                         )
                     }
@@ -231,11 +254,19 @@ fun HomeScreen(
                     }
                 }
 
-                items(dramas) { drama ->
+                val visibleDramas = if (featuredDrama != null && searchQuery.isBlank() && selectedCategory == null) {
+                    dramas.drop(1)
+                } else {
+                    dramas
+                }
+                items(visibleDramas) { drama ->
                     DramaCard(
                         drama = drama,
                         serverUrl = serverUrl,
-                        onClick = { onDramaClick(drama) }
+                        requestHeaders = requestHeaders,
+                        onClick = { onDramaClick(drama) },
+                        isFollowed = drama.id in followedDramaIds,
+                        onFollowClick = { onFollowClick(drama, drama.id !in followedDramaIds) }
                     )
                 }
             }
@@ -247,6 +278,7 @@ fun HomeScreen(
 fun HeroBanner(
     drama: Drama,
     serverUrl: String,
+    requestHeaders: Map<String, String> = emptyMap(),
     onClick: () -> Unit
 ) {
     Box(
@@ -259,7 +291,11 @@ fun HeroBanner(
             .clickable(onClick = onClick)
     ) {
         AsyncImage(
-            model = drama.displayCover(serverUrl),
+            model = authenticatedImageRequest(
+                LocalContext.current,
+                drama.displayCover(serverUrl),
+                requestHeaders
+            ),
             contentDescription = drama.displayTitle(),
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
@@ -289,7 +325,7 @@ fun HeroBanner(
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = "今日爆款",
+                        text = "推荐",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = Color.Black,
                             fontSize = 10.sp,
@@ -299,7 +335,7 @@ fun HeroBanner(
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = drama.heat?.let { "🔥 $it" } ?: "热度爆表",
+                    text = drama.heat?.let { "🔥 $it" } ?: drama.displayCategory(),
                     style = MaterialTheme.typography.labelSmall.copy(color = CinemaGold)
                 )
             }
